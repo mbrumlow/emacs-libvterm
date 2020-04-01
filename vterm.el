@@ -726,6 +726,7 @@ Argument EVENT process event."
 
 (defun vterm--window-adjust-process-window-size (process windows)
   "Adjust process window size considering the width of line number."
+  (unless vterm-copy-mode
   (let* ((size (funcall window-adjust-process-window-size-function
                         process windows))
          (width (car size))
@@ -738,7 +739,7 @@ Argument EVENT process event."
                (> width 0)
                (> height 0))
       (vterm--set-size vterm--term height width)
-      (cons width height))))
+      (cons width height)))))
 
 (defun vterm--get-margin-width ()
   "Get margin width of vterm buffer when `display-line-numbers-mode' is enabled."
