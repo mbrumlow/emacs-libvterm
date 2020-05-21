@@ -914,22 +914,21 @@ Argument EVENT process event."
 (advice-add #'text-scale-mode :after #'vterm--text-scale-mode)
 
 (defun vterm--window-adjust-process-window-size (process windows)
-  "Adjust width of window WINDOWS associated to process PROCESS.
-
-`vterm-min-window-width' determines the minimum width allowed."
-  (let* ((size (funcall window-adjust-process-window-size-function
-                        process windows))
-         (width (car size))
-         (height (cdr size))
-         (inhibit-read-only t))
-    (setq width (- width (vterm--get-margin-width)))
-    (setq width (max width vterm-min-window-width))
-    (when (and (processp process)
-               (process-live-p process)
-               (> width 0)
-               (> height 0))
-      (vterm--set-size vterm--term height width)
-      (cons width height))))
+  "Adjust process window size considering the width of line number."
+  (unless vterm-copy-mode
+    (let* ((size (funcall window-adjust-process-window-size-function
+                          process windows))
+           (width (car size))
+           (height (cdr size))
+           (inhibit-read-only t))
+      (setq width (- width (vterm--get-margin-width)))
+      (setq width (max width vterm-min-window-width))
+      (when (and (processp process)
+                 (process-live-p process)
+                 (> width 0)
+                 (> height 0))
+        (vterm--set-size vterm--term height width)
+        (cons width height)))))
 
 (defun vterm--get-margin-width ()
   "Get margin width of vterm buffer when `display-line-numbers-mode' is enabled."
