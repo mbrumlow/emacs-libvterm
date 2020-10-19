@@ -177,9 +177,9 @@ The package can be installed with `guix package -i emacs-vterm`.
 
 ## Shell-side configuration
 
-Some of the most useful features in `vterm` (e.g.,
-[directory-tracking and prompt-tracking](#directory-tracking-and-prompt-tracking) or
-[message passing](#message-passing)) require shell-side configurations. The main goal of
+Some of the most useful features in `vterm` (e.g., [directory-tracking and
+prompt-tracking](#directory-tracking-and-prompt-tracking) or [message
+passing](#message-passing)) require shell-side configurations. The main goal of
 these additional functions is to enable the shell to send information to `vterm`
 via properly escaped sequences. A function that helps in this task,
 `vterm_printf`, is defined below. This function is widely used throughout this
@@ -271,6 +271,15 @@ if [[ "$INSIDE_EMACS" = 'vterm' ]]; then
         tput clear;
     }
 fi
+```
+For `fish`:
+```
+if [ "$INSIDE_EMACS" = 'vterm' ]
+    function clear
+        vterm_printf "51;Evterm-clear-scrollback";
+        tput clear;
+    end
+end
 ```
 These aliases take advantage of the fact that `vterm` can execute `elisp`
 commands, as explained below.
@@ -447,7 +456,7 @@ For `fish`, put this in your `~/.config/fish/config.fish`:
 function vterm_prompt_end;
     vterm_printf '51;A'(whoami)'@'(hostname)':'(pwd)
 end
-functions -c fish_prompt vterm_old_fish_prompt
+functions --copy fish_prompt vterm_old_fish_prompt
 function fish_prompt --description 'Write out the prompt; do not replace this. Instead, put this at end of your file.'
     # Remove the trailing newline from the original prompt. This is done
     # using the string builtin from fish, but to make sure any escape codes
@@ -456,6 +465,9 @@ function fish_prompt --description 'Write out the prompt; do not replace this. I
     vterm_prompt_end
 end
 ```
+Here we are using the function `vterm_printf` that we have discussed above, so make
+sure that this function is defined in your configuration file.
+
 
 Directory tracking works on remote servers too. In case the hostname of your
 remote machine does not match the actual hostname needed to connect to that
@@ -486,6 +498,8 @@ The commands that are understood are defined in the setting `vterm-eval-cmds`.
 As `split-string-and-unquote` is used the parse the passed string, double quotes
 and backslashes need to be escaped via backslash. A convenient shell function to
 automate the substitution is
+
+`bash` or `zsh`:
 ```sh
 vterm_cmd() {
     local vterm_elisp
@@ -497,11 +511,22 @@ vterm_cmd() {
     vterm_printf "51;E$vterm_elisp"
 }
 ```
+`fish`:
+```sh
+function vterm_cmd --description 'Run an emacs command among the ones been defined in vterm-eval-cmds.'
+    set -l vterm_elisp ()
+    for arg in $argv
+        set -a vterm_elisp (printf '"%s" ' (string replace -a -r '([\\\\"])' '\\\\\\\\$1' $arg))
+    end
+    vterm_printf '51;E'(string join '' $vterm_elisp)
+end
+```
+
 Now we can write shell functions to call the ones defined in `vterm-eval-cmds`.
 
 ```sh
 find_file() {
-    vterm_cmd find-file "$(realpath "$@")"
+    vterm_cmd find-file "$(realpath "${@:-.}")"
 }
 
 say() {
@@ -509,11 +534,25 @@ say() {
 }
 ```
 
-This can be used inside `vterm` as
+Or for `fish`:
+```fish
+function find_file
+    set -q argv[1]; or set argv[1] "."
+    vterm_cmd find-file (realpath "$argv")
+end
+
+function say
+    vterm_cmd message "%s" "$argv"
+end
+```
+
+This newly defined `find_file` function can now be used inside `vterm` as
 
 ```sh
 find_file name_of_file_in_local_directory
 ```
+If you call `find_file` without specifying any file (you just execute `find_file` in your shell),
+`dired` will open with the current directory.
 
 As an example, say you like having files opened below the current window. You
 could add the command to do it on the lisp side like so:
@@ -532,7 +571,7 @@ Then add the command in your `.bashrc` file.
 
 ```sh
 open_file_below() {
-    vterm_cmd find-file-below "$(realpath "$@")"
+    vterm_cmd find-file-below "$(realpath "${@:-.}")"
 }
 ```
 
@@ -541,6 +580,14 @@ Then you can open any file from inside your shell.
 ```sh
 open_file_below ~/Documents
 ```
+
+## Shell-side configuration files
+
+The configurations described in earlier sections are combined in
+[`etc/`](./etc/). These can be appended to or loaded into your user
+configuration file. Alternatively, they can be installed system-wide, for
+example in `/etc/bash/bashrc.d/`, `/etc/profile.d/` (for `zsh`), or
+`/etc/fish/conf.d/` for `fish`.
 
 ## Frequently Asked Questions and Problems
 
@@ -616,21 +663,60 @@ A possible application of this function is in combination with `find-file`:
 ```
 This method does not work on remote machines.
 
+### How can I get the directory tracking in a more understandable way?
+
+If you looked at the reccomended way to set-up directory tracking, you will have
+noticed that it requires printing obscure code like `\e]2;%m:%2~\a` (unless you
+are using `fish`).
+
+There is another way to achieve this behavior. Define a shell function, on a
+local host you can simply use
+
+``` sh
+vterm_set_directory() {
+    vterm_cmd update-pwd "$PWD/"
+}
+```
+On a remote one, use instead
+``` sh
+vterm_set_directory() {
+    vterm_cmd update-pwd "/-:""$USER""@""$HOSTNAME"":""$PWD/"
+}
+```
+Then, for `zsh`, add this function to the `chpwd` hook:
+
+``` sh
+autoload -U add-zsh-hook
+add-zsh-hook -Uz chpwd (){ vterm_set_directory }
+```
+For `bash`, append it to the prompt:
+
+``` sh
+PROMPT_COMMAND="$PROMPT_COMMAND;vterm_set_directory"
+```
+Finally, add `update-pwd` to the list of commands that Emacs
+is allowed to execute from vterm:
+
+``` emacs-lisp
+(add-to-list 'vterm-eval-cmds '("update-pwd" (lambda (path) (setq default-directory path))))
+```
+
 ### When evil-mode is enabled, the cursor moves back in normal state, and this messes directory tracking
 
 `evil-collection` provides a solution for this problem. If you do not want to
 use `evil-collection`, you can add the following code:
+
 ```emacs-lisp
 (defun evil-collection-vterm-escape-stay ()
-  "Go back to normal state but don't move cursor backwards.
-Moving cursor backwards is the default vim behavior but
-it is not appropriate in some cases like terminals."
-  (setq-local evil-move-cursor-back nil))
+"Go back to normal state but don't move
+cursor backwards. Moving cursor backwards is the default vim behavior but it is
+not appropriate in some cases like terminals."
+(setq-local evil-move-cursor-back nil))
 
 (add-hook 'vterm-mode-hook #'evil-collection-vterm-escape-stay)
 ```
 
-  
+
 ## Related packages
 
 - [vterm-toggle](https://github.com/jixiuf/vterm-toggle): Toggles between a
